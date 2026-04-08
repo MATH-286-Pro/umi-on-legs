@@ -260,14 +260,10 @@ class Link2DVelocity(Link3DVelocity):
         return obs
 
     def get_lin_vel_err(self, state: EnvState):
-        return (
-            self.target_lin_vel[:, :2] - self.get_link_local_lin_vel(state=state)[:, :2]
-        ).norm(dim=-1)
+        return (self.target_lin_vel[:, :2] - self.get_link_local_lin_vel(state=state)[:, :2]).norm(dim=-1)
 
     def get_ang_vel_err(self, state: EnvState):
-        return (
-            self.target_ang_vel[:, 2] - self.get_link_local_ang_vel(state=state)[:, 2]
-        ).abs()
+        return (self.target_ang_vel[:, 2] - self.get_link_local_ang_vel(state=state)[:, 2]).abs()
 
 
 class Link6DVelocity(Link2DVelocity):
@@ -470,7 +466,7 @@ class ReachingLinkTask(Task):
                 f"Could not find {self.link_name!r} in actor {gym.get_actor_name(env, 0)!r}"
             )
         self.curr_target_pos = torch.zeros((self.num_envs, 3), device=self.device)
-        self.curr_target_rot_mat = torch.zeros(
+        self.curr_target_rot = torch.zeros(
             (self.num_envs, 3, 3), device=self.device
         )
 
@@ -478,7 +474,7 @@ class ReachingLinkTask(Task):
             (self.num_envs, sequence_sampler.episode_length, 3),
             device=self.storage_device,
         )
-        self.target_rot_mat_seq = torch.zeros(
+        self.target_rot_seq = torch.zeros(
             (self.num_envs, sequence_sampler.episode_length, 3, 3),
             device=self.storage_device,
         )
@@ -585,13 +581,10 @@ class ReachingLinkTask(Task):
                     lambda x: self.gym.get_env_origin(self.gym.get_env(self.sim, x)),
                     env_ids,
                 )
-            ],
-            dim=0,
-        ).to(
-            self.storage_device
-        )  # (num_envs, 3)
+            ], dim=0,).to(self.storage_device) # (num_envs, 3)
+        
         # get root positions
-        pos_seq, rot_mat_seq = self.sequence_sampler.sample(
+        pos_seq, rot_seq = self.sequence_sampler.sample(
             seed=int(
                 torch.randint(
                     low=0,
@@ -599,28 +592,22 @@ class ReachingLinkTask(Task):
                     size=(1,),
                     generator=self.generator,
                     device=self.storage_device,
-                )
-                .cpu()
-                .item()
-            ),
+                ).cpu().item()),
             batch_size=len(env_ids),
         )
-        assert rot_mat_seq.shape == (
-            len(env_ids),
-            self.sequence_sampler.episode_length,
-            3,
-            3,
-        )
 
-        assert pos_seq.shape == (len(env_ids), self.sequence_sampler.episode_length, 3)
+        # 添加 env_origin 偏移
         pos_seq = pos_seq.to(self.storage_device) + env_origins.unsqueeze(1)
-        rot_mat_seq = rot_mat_seq.to(self.storage_device)
+        rot_seq = rot_seq.to(self.storage_device)
+
         device_env_ids = env_ids.to(self.storage_device)
+
         self.target_pos_seq[device_env_ids] = pos_seq
-        self.target_rot_mat_seq[device_env_ids] = rot_mat_seq
+        self.target_rot_seq[device_env_ids] = rot_seq
 
         self.curr_target_pos[env_ids, :] = pos_seq[:, 0, :].to(self.device)
-        self.curr_target_rot_mat[env_ids, :] = rot_mat_seq[:, 0, :].to(self.device)
+        self.curr_target_rot[env_ids, :] = rot_seq[:, 0, :].to(self.device)
+
         # update curriculum
         if self.pos_sigma_curriculum is not None:
             avg_pos_err = self.past_pos_err.mean().item()
@@ -642,63 +629,42 @@ class ReachingLinkTask(Task):
                     self.orn_sigma_curriculum_level = level
 
         # update pose history
-        self.link_pose_history[device_env_ids, :, :, :] = torch.eye(
-            4, device=self.device
-        )
-        self.root_pose_history[device_env_ids, :, :, :] = torch.eye(
-            4, device=self.device
-        )
+        self.link_pose_history[device_env_ids, :, :, :] = torch.eye(4, device=self.device)
+        self.root_pose_history[device_env_ids, :, :, :] = torch.eye(4, device=self.device)
 
-    def get_targets_at_times(
-        self,
-        times: torch.Tensor,
-        sim_dt: float,
-    ):
-        episode_step = torch.clamp(
-            # (torch.zeros_like(times) / sim_dt).long(),
-            (times / sim_dt).long(),
-            min=0,
-            max=self.target_pos_seq.shape[1] - 1,
-        )
-        episode_step = torch.clamp(
-            episode_step, min=0, max=self.target_pos_seq.shape[1] - 1
-        ).to(self.storage_device)
-        env_idx = torch.arange(0, self.num_envs)
-        return (
-            self.target_pos_seq[env_idx, episode_step].to(self.device),
-            self.target_rot_mat_seq[env_idx, episode_step].to(self.device),
-        )
+    # 获取目标 trajectory 数据
+    def get_targets_at_times(self, times: torch.Tensor, sim_dt: float):
+        episode_step = torch.clamp((times / sim_dt).long(), min=0, max=self.target_pos_seq.shape[1] - 1,)
+        episode_step = torch.clamp(episode_step, min=0, max=self.target_pos_seq.shape[1]).to(self.storage_device)
+        env_idx      = torch.arange(0, self.num_envs)
+
+        target_pos = self.target_pos_seq[env_idx, episode_step].to(self.device)
+        target_orn = self.target_rot_seq[env_idx, episode_step].to(self.device)
+
+        return target_pos, target_orn
 
     def step(self, state: EnvState, control: Control) -> Dict[str, torch.Tensor]:
         (
             self.curr_target_pos[:, :],
-            self.curr_target_rot_mat[:, :],
+            self.curr_target_rot[:, :],
         ) = self.get_targets_at_times(
             times=state.episode_time,
             sim_dt=state.sim_dt,
         )
+
         pos_err = self.get_pos_err(state=state)
         orn_err = self.get_orn_err(state=state)
+
         # moving average of the error
-        smoothing = state.sim_dt * self.smoothing_dt_multiplier
+        smoothing         = state.sim_dt * self.smoothing_dt_multiplier
         self.past_pos_err = (1 - smoothing) * self.past_pos_err + smoothing * pos_err
         self.past_orn_err = (1 - smoothing) * self.past_orn_err + smoothing * orn_err
 
-        self.link_pose_history = torch.cat(
-            [
-                self.link_pose_history[:, 1:],
-                self.get_link_pose(state=state).unsqueeze(1),
-            ],
-            dim=1,
-        )
-        self.root_pose_history = torch.cat(
-            [
-                self.root_pose_history[:, 1:],
-                state.root_pose.clone().unsqueeze(1),
-            ],
-            dim=1,
-        )
+        self.link_pose_history = torch.cat([self.link_pose_history[:, 1:], self.get_link_pose(state=state).unsqueeze(1),], dim=1)
+        self.root_pose_history = torch.cat([self.root_pose_history[:, 1:], state.root_pose.clone().unsqueeze(1),], dim=1)
+        
         self.steps += 1
+        
         return {
             "pos_err": pos_err,
             "orn_err": orn_err,
@@ -722,7 +688,7 @@ class ReachingLinkTask(Task):
     def get_orn_err(self, state: EnvState) -> torch.Tensor:
         link_rot_mat = self.get_link_rot_mat(state=state)
         # rotation from link to target
-        rot_err_mat = self.curr_target_rot_mat @ link_rot_mat.transpose(1, 2)
+        rot_err_mat = self.curr_target_rot @ link_rot_mat.transpose(1, 2)
 
         trace = torch.diagonal(rot_err_mat, dim1=-2, dim2=-1).sum(dim=-1)
         # to prevent numerical instability, clip the trace to [-1, 3]
@@ -772,8 +738,8 @@ class ReachingLinkTask(Task):
         )
         orn_reward = torch.exp(-self.get_orn_err(state=state) / self.orn_err_sigma)
         return {
-            "pos": pos_reward * self.pos_reward_scale,
-            "orn": orn_reward * self.orn_reward_scale,
+            "pos":   pos_reward * self.pos_reward_scale,
+            "orn":   orn_reward * self.orn_reward_scale,
             "pose": (pos_reward * orn_reward) * self.pose_reward_scale,
         }
 
@@ -792,20 +758,15 @@ class ReachingLinkTask(Task):
         )
 
     def observe(self, state: EnvState) -> torch.Tensor:
+
+        # 通过 +- t_offset 获取多帧 obs 轨迹
+        # 世界坐标系下 目标位置
         global_target_pose = torch.stack(
-            [
-                self.get_target_pose(
-                    times=state.episode_time + t_offset,
-                    sim_dt=state.sim_dt,
-                )
-                for t_offset in self.target_obs_times
-            ],
-            dim=1,
-        )  # (num_envs, num_obs, 4, 4)
+            [self.get_target_pose(times=state.episode_time + t_offset, sim_dt=state.sim_dt,) for t_offset in self.target_obs_times], dim=1)  # (num_envs, num_obs, 4, 4)
+        
         # get the most outdated pose, to account for latency
-        latency_idx = int(
-            np.rint(self.get_latency_scheduler() * self.pose_latency_frames)
-        )  # number of frames to wait
+        latency_idx = int(np.rint(self.get_latency_scheduler() * self.pose_latency_frames))  # number of frames to wait
+
         if self.pose_latency_frame_variability is not None:
             latency_idx += int(
                 torch.randint(
@@ -814,69 +775,64 @@ class ReachingLinkTask(Task):
                     size=(1,),
                     device=self.storage_device,
                     generator=self.generator,
-                )
-                .cpu()
-                .item()
+                ).cpu().item()
             )
+
         # min is 1, since this index is negated to access last `latency_idx`th frame
         latency_idx = max(1, min(latency_idx, self.pose_latency_frames - 1))
-        observation_link_pose = (
-            self.root_pose_history[:, -latency_idx]
-            if self.target_relative_to_base
-            else self.link_pose_history[:, -latency_idx]
-        ).clone()  # (num_envs, 4, 4), clone otherwise sim state will be modified
-        if self.position_noise > 0 or self.euler_noise > 0:
-            noise_transform = torch.zeros((self.num_envs, 4, 4), device=self.device)
-            noise_transform[..., [0, 1, 2, 3], [0, 1, 2, 3]] = 1.0
-            if self.position_noise > 0:
-                noise_transform[..., :3, 3] = (
-                    torch.randn((self.num_envs, 3), device=self.device)
-                    * self.position_noise
-                )
-            if self.euler_noise > 0:
-                euler_noise = (
-                    torch.randn((self.num_envs, 3), device=self.device)
-                    * self.euler_noise
-                )
-                noise_transform[..., :3, :3] = pt3d.euler_angles_to_matrix(
-                    euler_noise, convention="XYZ"
-                )
-            observation_link_pose = noise_transform @ observation_link_pose
-        local_target_pose = (
-            torch.linalg.inv(observation_link_pose[:, None, :, :]) @ global_target_pose
-        )
-        if self.position_obs_encoding == "linear":
-            pos_obs = (local_target_pose[..., :3, 3] * self.pos_obs_scale).view(
-                self.num_envs, -1
-            )
-        elif self.position_obs_encoding == "log-direction":
-            distance = (
-                torch.linalg.norm(local_target_pose[..., :3, 3], dim=-1, keepdim=True)
-                + 1e-8
-            )
-            direction = local_target_pose[..., :3, 3] / distance
-            pos_obs = torch.cat(
-                (
-                    torch.log(distance * self.pos_obs_scale).reshape(self.num_envs, -1),
-                    direction.reshape(
-                        self.num_envs, -1
-                    ),  # direction is already in normalized range
-                ),
-                dim=-1,
-            )
+
+        # 坐标系 4x4 齐次变换矩阵
+        # .yaml 中设置为 false
+        if self.target_relative_to_base:
+            observation_link_pose = self.root_pose_history[:, -latency_idx].clone()   # clone otherwise sim state will be modified
         else:
-            raise ValueError(
-                f"Unknown position observation encoding: {self.position_obs_encoding!r}"
-            )
+            observation_link_pose = self.link_pose_history[:, -latency_idx].clone()   # clone otherwise sim state will be modified
 
-        if self.pos_obs_clip is not None:
-            pos_obs = torch.clamp(pos_obs, -self.pos_obs_clip, self.pos_obs_clip)
-        orn_obs = (
-            pt3d.matrix_to_rotation_6d(local_target_pose[..., :3, :3])
-            * self.orn_obs_scale
-        ).view(self.num_envs, -1)
 
-        relative_pose_obs = torch.cat((pos_obs, orn_obs), dim=1)
+        # # 噪声 (暂时跳过)
+        # if self.position_noise > 0 or self.euler_noise > 0:
+        #     noise_transform = torch.zeros((self.num_envs, 4, 4), device=self.device)
+        #     noise_transform[..., 
+        #                     [0, 1, 2, 3], 
+        #                     [0, 1, 2, 3]] = 1.0
+        #     if self.position_noise > 0:
+        #         noise_transform[..., :3, 3] = (torch.randn((self.num_envs, 3), device=self.device) * self.position_noise)
+        #     if self.euler_noise > 0:
+        #         euler_noise = (torch.randn((self.num_envs, 3), device=self.device) * self.euler_noise)
+        #         noise_transform[..., :3, :3] = pt3d.euler_angles_to_matrix(euler_noise, convention="XYZ")
+
+        #     observation_link_pose = noise_transform @ observation_link_pose
+
+        # 世界坐标 转 体坐标
+        local_target_pose = (torch.linalg.inv(observation_link_pose[:, None, :, :]) @ global_target_pose)
+
+
+        # 目标位置编码
+        # .yaml 设置为 linear
+        match self.position_obs_encoding.lower():
+
+            case "linear": # 线性放大
+                pos_obs = (local_target_pose[..., :3, 3] * self.pos_obs_scale).view(self.num_envs, -1)
+
+            case "log-direction": # 对数
+                distance = (torch.linalg.norm(local_target_pose[..., :3, 3], dim=-1, keepdim=True) + 1e-8)
+                direction = local_target_pose[..., :3, 3] / distance
+                pos_obs = torch.cat(
+                    (
+                        torch.log(distance * self.pos_obs_scale).reshape(self.num_envs, -1),
+                        direction.reshape(self.num_envs, -1),  # direction is already in normalized range
+                    ),dim=-1,
+                )
+
+        # # .yaml 设置为 null
+        # if self.pos_obs_clip is not None:
+        #     pos_obs = torch.clamp(pos_obs, -self.pos_obs_clip, self.pos_obs_clip)
+
+        orn_obs = (pt3d.matrix_to_rotation_6d(local_target_pose[..., :3, :3]) * self.orn_obs_scale).view(self.num_envs, -1)
+
+        relative_pose_obs = torch.cat((pos_obs, 
+                                       orn_obs), dim=1)
+
         # NOTE after episode resetting, the first pose will be outdated
         # (this is a quirk of isaacgym, where state resets don't apply until the
         # next physics step), we will have to wait for `pose_latency` seconds
@@ -890,11 +846,52 @@ class ReachingLinkTask(Task):
 
         return relative_pose_obs
 
+
+
+
+    def observe(self, state: EnvState) -> torch.Tensor:
+
+        # 通过 +- t_offset 获取多帧 obs 轨迹
+        # 世界坐标系下 目标位置
+        global_target_pose = torch.stack(
+            [self.get_target_pose(times=state.episode_time + t_offset, sim_dt=state.sim_dt,) for t_offset in self.target_obs_times], dim=1)  # (num_envs, num_obs, 4, 4)
+        
+        # # get the most outdated pose, to account for latency
+        # # min is 1, since this index is negated to access last `latency_idx`th frame
+        # latency_idx = int(np.rint(self.get_latency_scheduler() * self.pose_latency_frames))  # number of frames to wait
+        # latency_idx = max(1, min(latency_idx, self.pose_latency_frames - 1))
+
+        # 世界坐标 转 体坐标
+        # 坐标系 4x4 齐次变换矩阵
+        # observation_link_pose = self.link_pose_history[:, -latency_idx].clone()   # clone otherwise sim state will be modified
+        observation_link_pose = self.link_pose_history[:, -1].clone()
+        local_target_pose     = (torch.linalg.inv(observation_link_pose[:, None, :, :]) @ global_target_pose)
+
+        # 变换矩阵 解压为 pos + orn
+        pos_obs = (local_target_pose[..., :3, 3] * self.pos_obs_scale).view(self.num_envs, -1)
+        orn_obs = (pt3d.matrix_to_rotation_6d(local_target_pose[..., :3, :3]) * self.orn_obs_scale).view(self.num_envs, -1)
+        relative_pose_obs = torch.cat((pos_obs, orn_obs), dim=1)
+
+        # NOTE after episode resetting, the first pose will be outdated
+        # (this is a quirk of isaacgym, where state resets don't apply until the
+        # next physics step), we will have to wait for `pose_latency` seconds
+        # to get the first pose so just return special values for such cases
+        waiting_for_pose_mask = (
+            (observation_link_pose == torch.eye(4, device=self.device))
+            .all(dim=-1)
+            .all(dim=-1)
+        )
+        relative_pose_obs[waiting_for_pose_mask] = -1.0
+
+        return relative_pose_obs
+
+
+
     def visualize(self, state: EnvState, viewer: gymapi.Viewer, vis_env_ids: List[int]):
         pos_err = self.get_pos_err(state=state)
         cm = plt.get_cmap("inferno")
         target_quats = (
-            matrix_to_quaternion(self.curr_target_rot_mat)
+            matrix_to_quaternion(self.curr_target_rot)
             .cpu()
             .numpy()[:, [1, 2, 3, 0]]
         )
