@@ -23,7 +23,7 @@ from legged_gym.env.isaacgym.utils import quat_apply_yaw, torch_rand_float
 from legged_gym.env.obs import ObservationAttribute
 from legged_gym.rsl_rl.env import VecEnv
 
-PartialTask = Callable[[gymapi.Gym, gymapi.Sim, str, torch.Generator], Task]
+PartialTask       = Callable[[gymapi.Gym, gymapi.Sim, str, torch.Generator], Task]
 PartialConstraint = Callable[[gymapi.Gym, gymapi.Sim, str, torch.Generator], Constraint]
 
 
@@ -39,7 +39,7 @@ class IsaacGymEnv(VecEnv):
         setup_obs: Dict[str, EnvSetupAttribute],
         privileged_state_obs: Dict[str, EnvObservationAttribute],
         privileged_setup_obs: Dict[str, EnvSetupAttribute],
-        tasks: Dict[str, PartialTask],
+        tasks:       Dict[str, PartialTask],
         constraints: Dict[str, PartialConstraint],
         seed: int,
         dof_pos_reset_range_scale: float,
@@ -331,11 +331,8 @@ class IsaacGymEnv(VecEnv):
                 self.device
             )
         )
-        reward = torch.zeros(
-            self.num_envs,
-            device=self.device,
-            dtype=torch.float,
-        )
+        reward = torch.zeros(self.num_envs, device=self.device, dtype=torch.float)
+
         # step physics and render each frame
         rendering = self.viewer is not None or return_vis
 
@@ -394,17 +391,16 @@ class IsaacGymEnv(VecEnv):
                             info[stat_key] = (info[stat_key] * decimation_step + v) / (
                                 decimation_step + 1
                             )
-                reward_terms = self.compute_reward(state=self.state, control=self.ctrl)
-                reward += reward_terms["reward/total"]
-                for k, v in reward_terms.items():
+                reward_dict = self.compute_reward(state=self.state, control=self.ctrl) #00ff00 这里返回的是字典
+                reward += reward_dict["reward/total"]
+                for k, v in reward_dict.items():
                     if k in info:
                         info[k] += v
                     else:
                         info[k] = v
         self.global_step += 1
-        if self.cfg.domain_rand.push_robots and (
-            self.global_step % self.cfg.domain_rand.push_interval == 0
-        ):
+
+        if self.cfg.domain_rand.push_robots and (self.global_step % self.cfg.domain_rand.push_interval == 0):
             """Random pushes the robots. Emulates an impulse by setting a randomized base velocity."""
             self.state.root_state[:, 7:13] = torch_rand_float(
                 -self.cfg.domain_rand.max_push_vel,
@@ -413,12 +409,9 @@ class IsaacGymEnv(VecEnv):
                 device=self.device,
                 generator=self.generator,
             )  # lin vel x/y/z, ang vel x/y/z
-            self.gym.set_actor_root_state_tensor(
-                self.sim, gymtorch.unwrap_tensor(self.state.root_state)
-            )
-        if self.cfg.domain_rand.transport_robots and (
-            self.global_step % self.cfg.domain_rand.transport_interval == 0
-        ):
+            self.gym.set_actor_root_state_tensor(self.sim, gymtorch.unwrap_tensor(self.state.root_state))
+
+        if self.cfg.domain_rand.transport_robots and (self.global_step % self.cfg.domain_rand.transport_interval == 0):
             """Randomly transports the robots to a new location"""
             self.state.root_state[:, 0:3] += (
                 torch.randn(
@@ -549,65 +542,48 @@ class IsaacGymEnv(VecEnv):
         if self.cfg.env.send_timeouts:
             self.extras["time_outs"] = self.time_out_buf
 
-    def compute_reward(self, state: EnvState, control: Control):
+    def compute_reward(self, state: EnvState, control: Control) -> Dict:
         """Compute rewards
         Calls each reward function which had a non-zero scale (processed in self._prepare_reward_function())
         adds each terms to the episode sums and to the total reward
         """
         return_dict = {
-            "total": torch.zeros(
-                self.num_envs,
-                device=self.device,
-                dtype=torch.float,
-            ),
-            "env": torch.zeros(
-                self.num_envs,
-                device=self.device,
-                dtype=torch.float,
-            ),
-            "constraint": torch.zeros(
-                self.num_envs,
-                device=self.device,
-                dtype=torch.float,
-            ),
-            "task": torch.zeros(
-                self.num_envs,
-                device=self.device,
-                dtype=torch.float,
-            ),
+            "total":      torch.zeros(self.num_envs, device=self.device, dtype=torch.float,),
+            "env":        torch.zeros(self.num_envs, device=self.device, dtype=torch.float,),
+            "constraint": torch.zeros(self.num_envs, device=self.device, dtype=torch.float,),
+            "task":       torch.zeros(self.num_envs, device=self.device, dtype=torch.float,),
         }
+
+        # Env 奖励
         for i in range(len(self.reward_functions)):
             name = self.reward_names[i]
-            return_dict[name] = (
-                self.reward_functions[i](state=state, control=control)
-                * self.reward_scales[name]
-            )
+            return_dict[name] = (self.reward_functions[i](state=state, control=control) * self.reward_scales[name])
             return_dict["total"] += return_dict[name]
-            return_dict["env"] += return_dict[name]
+            return_dict["env"]   += return_dict[name]
+
+        # Constraint 奖励
         for constraint_name, constraint in self.constraints.items():
-            constraint_rewards = {
-                f"constraint/{constraint_name}/{k}": v
-                for k, v in constraint.reward(state=state, control=control).items()
-            }
+            constraint_rewards = {f"constraint/{constraint_name}/{k}": v for k, v in constraint.reward(state=state, control=control).items()}
             return_dict.update(constraint_rewards)
-            return_dict["total"] += sum(constraint_rewards.values())
+            return_dict["total"]      += sum(constraint_rewards.values())
             return_dict["constraint"] += sum(constraint_rewards.values())
+
+        # Task 奖励 (跟踪 End Effector)
         for task_name, task in self.tasks.items():
-            task_rewards = {
-                f"task/{task_name}/{k}": v
-                for k, v in task.reward(state=state, control=control).items()
-            }
+            task_rewards = {f"task/{task_name}/{k}": v for k, v in task.reward(state=state, control=control).items()}
             return_dict.update(task_rewards)
             return_dict["total"] += sum(task_rewards.values())
-            return_dict["task"] += sum(task_rewards.values())
+            return_dict["task"]  += sum(task_rewards.values())
+
         if self.cfg.rewards.only_positive_rewards:
             return_dict["total"][:] = torch.clip(return_dict["total"][:], min=0.0)
-        return_dict["task_to_env_ratio"] = return_dict["task"].abs() / (
-            return_dict["env"].abs() + 1e-10
-        )
-        return_dict["task_to_constraint_ratio"] = return_dict["task"].abs() / (
-            return_dict["constraint"].abs() + 1e-10
-        )
+
+        return_dict["task_to_env_ratio"]        = return_dict["task"].abs() / (return_dict["env"].abs() + 1e-10)
+        return_dict["task_to_constraint_ratio"] = return_dict["task"].abs() / (return_dict["constraint"].abs() + 1e-10)
+
+        # 最后 policy 拿到的是 reward_dict["total"] 的奖励 #00ff00
+
+        # 这里奖励会乘上系数
         return {f"reward/{k}": v * self.reward_dt_scale for k, v in return_dict.items()}
 
     def get_observations(
@@ -623,22 +599,19 @@ class IsaacGymEnv(VecEnv):
             assert value.shape[-1] == obs_attr.dim
             obs_attrs.append(value)
         state_obs_tensor = torch.cat(
-            obs_attrs,
-            dim=1,
-        )
+                                    obs_attrs,
+                                    dim=1,
+                                )
         if len(self.tasks) > 0:
             all_task_obs = []
             for k, task in self.tasks.items():
                 task_obs = task.observe(state=state)
                 all_task_obs.append(task_obs)
-            task_obs_tensor = torch.cat(
-                all_task_obs,
-                dim=1,
-            )
+            task_obs_tensor = torch.cat(all_task_obs, dim=1,)
+
         else:
-            task_obs_tensor = torch.zeros(
-                (self.num_envs, 0), dtype=torch.float, device=self.device
-            )
+            task_obs_tensor = torch.zeros((self.num_envs, 0), dtype=torch.float, device=self.device)
+
         if len(setup_obs) > 0:
             obs_attrs = []
             for k, obs_attr in setup_obs.items():
@@ -649,9 +622,8 @@ class IsaacGymEnv(VecEnv):
                 obs_attrs.append(value)
             setup_obs_tensor = torch.cat(obs_attrs, dim=1)
         else:
-            setup_obs_tensor = torch.zeros(
-                (self.num_envs, 0), dtype=torch.float, device=self.device
-            )
+            setup_obs_tensor = torch.zeros((self.num_envs, 0), dtype=torch.float, device=self.device)
+
         return torch.cat(
             (
                 setup_obs_tensor,
@@ -901,7 +873,7 @@ class IsaacGymEnv(VecEnv):
                 device=self.device,
                 generator=self.generator,
             )
-        self.state.root_state[env_ids, :3] += self.env_origins[env_ids]
+        self.state.root_state[env_ids, :3] += self.env_origins[env_ids] # 添加 env origin 偏移
         env_ids_int32 = env_ids.to(dtype=torch.int32)
         self.gym.set_actor_root_state_tensor_indexed(
             self.sim,
