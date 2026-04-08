@@ -14,6 +14,7 @@ from legged_gym.env.isaacgym.task import Task
 import pytorch3d.transforms as pt3d
 
 
+# 这个是 基类，下面的类都是以这个为模板的
 class Constraint(Task):
     """
     Constraints are a special type of task that can be used to enforce
@@ -41,17 +42,17 @@ class Constraint(Task):
         self.terminate_on_violation = terminate_on_violation
         self.skip_stats = skip_stats
 
+    # 计算奖励
     def reward(self, state: EnvState, control: Control) -> Dict[str, torch.Tensor]:
+
         retval = {}
+
         if self.violation_weight != 0:
-            retval["hard_violation"] = (
-                self.check_violation(state=state, control=control)
-                * self.violation_weight
-            )
+            retval["hard_violation"] = (self.check_violation(state=state, control=control) * self.violation_weight)
+
         if self.penalty_weight != 0:
-            retval["soft_penalty"] = (
-                self.compute_penalty(state=state, control=control) * self.penalty_weight
-            )
+            retval["soft_penalty"] = (self.compute_penalty(state=state, control=control) * self.penalty_weight)
+
         return retval
 
     @abstractmethod
@@ -101,63 +102,65 @@ class JointLimit(Constraint):
             penalty_weight=penalty_weight,
             terminate_on_violation=terminate_on_violation,
         )
+
+        # 计算上下限
+        assert (upper > lower).all(), "upper limit must be greater than lower limit"
         self.upper = upper[None, :]
         self.lower = lower[None, :]
-        self.mid = (upper + lower) / 2.0
-        assert (upper > lower).all(), "upper limit must be greater than lower limit"
+        self.mid   = (upper + lower) / 2.0
         self.range = upper - lower
+
         # violation scale is the upper bound
         self.violation_scale = violation_scale
+
         # penalty scale is the lower bound where penalization kicks in
         self.penalty_scale = penalty_scale
-        all_joint_names = self.gym.get_actor_dof_names(
-            self.gym.get_env(self.sim, 0),
-            0,
-        )
-        self.joint_names = joint_names if joint_names is not None else all_joint_names
-        self.joint_indices = torch.tensor(
-            [all_joint_names.index(joint_name) for joint_name in self.joint_names]
-        ).to(self.device, torch.long)
-        assert (
-            self.joint_indices != -1
-        ).all(), f"joint names can't be found: {joint_names}"
+
+        # 关节信息
+        all_joint_names    = self.gym.get_actor_dof_names(self.gym.get_env(self.sim, 0),0,)
+        self.joint_names   = joint_names if joint_names is not None else all_joint_names
+        self.joint_indices = torch.tensor([all_joint_names.index(joint_name) for joint_name in self.joint_names]).to(self.device, torch.long)
+
+        assert (self.joint_indices != -1).all(), f"joint names can't be found: {joint_names}"
 
     def check_violation(self, state: EnvState, control: Control) -> torch.Tensor:
         return torch.logical_or(
             state.dof_pos[:, self.joint_indices] > self.upper * self.violation_scale,
             state.dof_pos[:, self.joint_indices] < self.lower * self.violation_scale,
-        ).any(
-            dim=1,
-        )
+        ).any(dim=1,)
 
     def compute_usage_range(self, value):
         return (value - self.mid).abs() / self.range
 
+    # Penalize dof positions too close to the limit
     def compute_penalty(self, state: EnvState, control: Control) -> torch.Tensor:
-        # Penalize dof positions too close to the limit
         penalizing_lower = self.mid - 0.5 * self.range * self.penalty_scale
         penalizing_upper = self.mid + 0.5 * self.range * self.penalty_scale
-        out_of_limits = -(state.dof_pos[:, self.joint_indices] - penalizing_lower).clip(
-            max=0.0
-        )  # lower limit
-        out_of_limits += (state.dof_pos[:, self.joint_indices] - penalizing_upper).clip(
-            min=0.0
-        )
+        out_of_limits = -(state.dof_pos[:, self.joint_indices] - penalizing_lower).clip(max=0.0)  # lower limit
+        out_of_limits += (state.dof_pos[:, self.joint_indices] - penalizing_upper).clip(min=0.0)
         return torch.sum(out_of_limits, dim=1)
 
     def step(self, state: EnvState, control: Control) -> Dict[str, torch.Tensor]:
-        if self.skip_stats:
-            return {}
-        violation = self.check_violation(state=state, control=control)
-        # also compute, given the current action, how much of the action space is being used
-        range_usage = self.compute_usage_range(value=state.dof_pos)
-        stats = {
-            "violation": violation,
-            "avg_range_usage": range_usage.mean(dim=1),
-        }
-        for joint_idx, joint_name in zip(self.joint_indices, self.joint_names):
-            stats[f"usage/{joint_name}"] = range_usage[:, joint_idx]
-        return stats
+        
+        match self.skip_stats:
+
+            case True:
+                return {}
+            
+            case False:
+                # also compute, given the current action, how much of the action space is being used
+                violation   = self.check_violation(state=state, control=control)
+                range_usage = self.compute_usage_range(value=state.dof_pos)
+
+                stats = {
+                    "violation": violation,
+                    "avg_range_usage": range_usage.mean(dim=1),
+                }
+
+                for joint_idx, joint_name in zip(self.joint_indices, self.joint_names):
+                    stats[f"usage/{joint_name}"] = range_usage[:, joint_idx]
+
+                return stats
 
 
 class ActionRateLimit(Constraint):
