@@ -1601,14 +1601,14 @@ Stephen Brawner (brawner@gmail.com)
         </collision>
         <!-- left finger -->
         <visual>
-            <origin xyz="0.072 -0.002 0" rpy="0 1.57079632679 0.0" />
+            <origin xyz="0.072 -0.04 0" rpy="0 1.57079632679 0.0" />
             <geometry>
                 <mesh
                     filename="resources/robots/go2_arx5/arx5_meshes/one_piece_wide_grasp_finray_finger.obj" />
             </geometry>
         </visual>
         <collision>
-            <origin xyz="0.072 -0.002 0" rpy="0 1.57079632679 0.0" />
+            <origin xyz="0.072 -0.04 0" rpy="0 1.57079632679 0.0" />
             <geometry>
                 <mesh
                     filename="resources/robots/go2_arx5/arx5_meshes/collider.obj" />
@@ -1616,14 +1616,14 @@ Stephen Brawner (brawner@gmail.com)
         </collision>
         <!-- right finger -->
         <visual>
-            <origin xyz="0.072 0.002 0" rpy="3.14159265359 -1.57079632679 0.0" />
+            <origin xyz="0.072 0.04 0" rpy="3.14159265359 -1.57079632679 0.0" />
             <geometry>
                 <mesh
                     filename="resources/robots/go2_arx5/arx5_meshes/one_piece_wide_grasp_finray_finger.obj" />
             </geometry>
         </visual>
         <collision>
-            <origin xyz="0.072 0.002 0" rpy="3.14159265359 -1.57079632679 0.0" />
+            <origin xyz="0.072 0.04 0" rpy="3.14159265359 -1.57079632679 0.0" />
             <geometry>
                 <mesh
                     filename="resources/robots/go2_arx5/arx5_meshes/collider.obj" />
