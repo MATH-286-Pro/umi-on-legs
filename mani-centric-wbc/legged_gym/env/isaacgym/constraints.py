@@ -48,27 +48,27 @@ class Constraint(Task):
         retval = {}
 
         if self.violation_weight != 0:
-            retval["hard_violation"] = (self.check_violation(state=state, control=control) * self.violation_weight)
+            retval["hard_violation"] = (self.compute_hard_panelty(state=state, control=control) * self.violation_weight)
 
         if self.penalty_weight != 0:
-            retval["soft_penalty"] = (self.compute_penalty(state=state, control=control) * self.penalty_weight)
+            retval["soft_penalty"]   = (self.compute_soft_penalty(state=state, control=control) * self.penalty_weight)
 
         return retval
 
     @abstractmethod
-    def check_violation(self, state: EnvState, control: Control) -> torch.Tensor:
+    def compute_hard_panelty(self, state: EnvState, control: Control) -> torch.Tensor:
         """
         returns bool tensors indicating if the constraint is violated
         """
         raise NotImplementedError()
 
     @abstractmethod
-    def compute_penalty(self, state: EnvState, control: Control) -> torch.Tensor:
+    def compute_soft_penalty(self, state: EnvState, control: Control) -> torch.Tensor:
         raise NotImplementedError()
 
     def check_termination(self, state: EnvState, control: Control) -> torch.Tensor:
         if self.terminate_on_violation:
-            return self.check_violation(state=state, control=control)
+            return self.compute_hard_panelty(state=state, control=control)
         return torch.zeros(state.dof_pos.shape[0], device=self.device, dtype=torch.bool)
 
 
@@ -123,7 +123,7 @@ class JointLimit(Constraint):
 
         assert (self.joint_indices != -1).all(), f"joint names can't be found: {joint_names}"
 
-    def check_violation(self, state: EnvState, control: Control) -> torch.Tensor:
+    def compute_hard_panelty(self, state: EnvState, control: Control) -> torch.Tensor:
         return torch.logical_or(
             state.dof_pos[:, self.joint_indices] > self.upper * self.violation_scale,
             state.dof_pos[:, self.joint_indices] < self.lower * self.violation_scale,
@@ -133,7 +133,7 @@ class JointLimit(Constraint):
         return (value - self.mid).abs() / self.range
 
     # Penalize dof positions too close to the limit
-    def compute_penalty(self, state: EnvState, control: Control) -> torch.Tensor:
+    def compute_soft_penalty(self, state: EnvState, control: Control) -> torch.Tensor:
         penalizing_lower = self.mid - 0.5 * self.range * self.penalty_scale
         penalizing_upper = self.mid + 0.5 * self.range * self.penalty_scale
         out_of_limits = -(state.dof_pos[:, self.joint_indices] - penalizing_lower).clip(max=0.0)  # lower limit
@@ -149,7 +149,7 @@ class JointLimit(Constraint):
             
             case False:
                 # also compute, given the current action, how much of the action space is being used
-                violation   = self.check_violation(state=state, control=control)
+                violation   = self.compute_hard_panelty(state=state, control=control)
                 range_usage = self.compute_usage_range(value=state.dof_pos)
 
                 stats = {
@@ -207,19 +207,19 @@ class ActionRateLimit(Constraint):
             self.joint_indices != -1
         ).all(), f"joint names can't be found: {joint_names}"
 
-    def check_violation(self, state: EnvState, control: Control) -> torch.Tensor:
+    def compute_hard_panelty(self, state: EnvState, control: Control) -> torch.Tensor:
         prev_action = control.prev_action
         action_rate = (control.action - prev_action)[:, self.joint_indices]
         return (action_rate.abs() > self.violation_action_rate).any(dim=1)
 
-    def compute_penalty(self, state: EnvState, control: Control) -> torch.Tensor:
+    def compute_soft_penalty(self, state: EnvState, control: Control) -> torch.Tensor:
         delta_action = (control.action - control.prev_action)[:, self.joint_indices]
         return torch.sum(delta_action.abs() ** self.power, dim=1)
 
     def step(self, state: EnvState, control: Control) -> Dict[str, torch.Tensor]:
         if self.skip_stats:
             return {}
-        violation = self.check_violation(state=state, control=control)
+        violation = self.compute_hard_panelty(state=state, control=control)
         action_rate = control.action - control.prev_action
         stats = {
             "violation": violation,
@@ -272,12 +272,12 @@ class TorqueLimit(Constraint):
         ).all(), f"joint names can't be found: {joint_names}"
         self.power = power
 
-    def check_violation(self, state: EnvState, control: Control) -> torch.Tensor:
+    def compute_hard_panelty(self, state: EnvState, control: Control) -> torch.Tensor:
         return (
             control.torque[..., self.joint_indices].abs() > self.violation_torque
         ).any(dim=1)
 
-    def compute_penalty(self, state: EnvState, control: Control) -> torch.Tensor:
+    def compute_soft_penalty(self, state: EnvState, control: Control) -> torch.Tensor:
         return torch.sum(
             control.torque[..., self.joint_indices].abs() ** self.power, dim=1
         )
@@ -285,7 +285,7 @@ class TorqueLimit(Constraint):
     def step(self, state: EnvState, control: Control) -> Dict[str, torch.Tensor]:
         if self.skip_stats:
             return {}
-        violation = self.check_violation(state=state, control=control)
+        violation = self.compute_hard_panelty(state=state, control=control)
         stats = {
             "violation": violation,
             "avg_torque": control.torque[..., self.joint_indices].abs().mean(dim=1),
@@ -327,16 +327,16 @@ class JointVelocity(Constraint):
         )
         self.power = power
 
-    def check_violation(self, state: EnvState, control: Control) -> torch.Tensor:
+    def compute_hard_panelty(self, state: EnvState, control: Control) -> torch.Tensor:
         return (state.dof_vel.abs() > self.violation_vel).any(dim=1)
 
-    def compute_penalty(self, state: EnvState, control: Control) -> torch.Tensor:
+    def compute_soft_penalty(self, state: EnvState, control: Control) -> torch.Tensor:
         return torch.sum(state.dof_vel.abs() ** self.power, dim=1)
 
     def step(self, state: EnvState, control: Control) -> Dict[str, torch.Tensor]:
         if self.skip_stats:
             return {}
-        violation = self.check_violation(state=state, control=control)
+        violation = self.compute_hard_panelty(state=state, control=control)
         stats = {
             "violation": violation,
             "avg_velocity": state.dof_vel.abs().mean(dim=1),
@@ -379,16 +379,16 @@ class JointAccelerationLimit(Constraint):
     def get_acc(self, state: EnvState):
         return (state.prev_dof_vel - state.dof_vel) / state.sim_dt
 
-    def check_violation(self, state: EnvState, control: Control) -> torch.Tensor:
+    def compute_hard_panelty(self, state: EnvState, control: Control) -> torch.Tensor:
         return (self.get_acc(state=state).abs() > self.violation_acc).any(dim=1)
 
-    def compute_penalty(self, state: EnvState, control: Control) -> torch.Tensor:
+    def compute_soft_penalty(self, state: EnvState, control: Control) -> torch.Tensor:
         return torch.sum(torch.square(self.get_acc(state=state)), dim=1)
 
     def step(self, state: EnvState, control: Control) -> Dict[str, torch.Tensor]:
         if self.skip_stats:
             return {}
-        violation = self.check_violation(state=state, control=control)
+        violation = self.compute_hard_panelty(state=state, control=control)
         stats = {
             "violation": violation,
             "avg_acceleration": self.get_acc(state=state).abs().mean(dim=1),
@@ -440,7 +440,7 @@ class Collision(Constraint):
             self.link_indices != -1
         ).all(), f"penalty link names can't be found: {link_names}"
 
-    def check_violation(self, state: EnvState, control: Control) -> torch.Tensor:
+    def compute_hard_panelty(self, state: EnvState, control: Control) -> torch.Tensor:
         return (
             torch.norm(
                 state.contact_forces[:, self.link_indices, :],
@@ -449,7 +449,7 @@ class Collision(Constraint):
             > self.violation_force_norm
         ).any(dim=1)
 
-    def compute_penalty(self, state: EnvState, control: Control) -> torch.Tensor:
+    def compute_soft_penalty(self, state: EnvState, control: Control) -> torch.Tensor:
         return torch.sum(
             (
                 torch.norm(
@@ -464,7 +464,7 @@ class Collision(Constraint):
     def step(self, state: EnvState, control: Control) -> Dict[str, torch.Tensor]:
         if self.skip_stats:
             return {}
-        violation = self.check_violation(state=state, control=control)
+        violation = self.compute_hard_panelty(state=state, control=control)
         stats = {
             "violation": violation,
             "avg_force": torch.norm(
@@ -512,7 +512,7 @@ class FeetDragging(Constraint):
         self.feet_drag_sigma = feet_drag_sigma
         self.feet_rigid_body_indices = feet_rigid_body_indices
 
-    def check_violation(self, state: EnvState, control: Control) -> torch.Tensor:
+    def compute_hard_panelty(self, state: EnvState, control: Control) -> torch.Tensor:
         feet_height = state.rigid_body_pos[:, self.feet_rigid_body_indices, 2]
         feet_planar_speed = torch.sum(
             torch.square(state.rigid_body_lin_vel[:, self.feet_rigid_body_indices, :2]),
@@ -523,7 +523,7 @@ class FeetDragging(Constraint):
             feet_planar_speed > self.violation_feet_drag_speed,
         ).any(dim=-1)
 
-    def compute_penalty(self, state: EnvState, control: Control) -> torch.Tensor:
+    def compute_soft_penalty(self, state: EnvState, control: Control) -> torch.Tensor:
         feet_height_diff = torch.clip(
             state.rigid_body_pos[:, self.feet_rigid_body_indices, 2]
             - self.penalty_feet_drag_height,
@@ -541,7 +541,7 @@ class FeetDragging(Constraint):
     def step(self, state: EnvState, control: Control) -> Dict[str, torch.Tensor]:
         if self.skip_stats:
             return {}
-        return {"violation": self.check_violation(state=state, control=control)}
+        return {"violation": self.compute_hard_panelty(state=state, control=control)}
 
 
 class StayCloseToDefaultConfig(Constraint):
@@ -586,12 +586,12 @@ class StayCloseToDefaultConfig(Constraint):
         self.default_config = default_config
         self.power = power
 
-    def check_violation(self, state: EnvState, control: Control) -> torch.Tensor:
+    def compute_hard_panelty(self, state: EnvState, control: Control) -> torch.Tensor:
         raise NotImplementedError(
             "StayCloseToDefaultConfig violation check not supported"
         )
 
-    def compute_penalty(self, state: EnvState, control: Control) -> torch.Tensor:
+    def compute_soft_penalty(self, state: EnvState, control: Control) -> torch.Tensor:
         return torch.sum(
             (state.dof_pos[:, self.joint_indices] - self.default_config[None, :]).abs()
             ** self.power,
@@ -635,10 +635,10 @@ class RootHeight(Constraint):
         )
         self.target_height = target_height
 
-    def check_violation(self, state: EnvState, control: Control) -> torch.Tensor:
+    def compute_hard_panelty(self, state: EnvState, control: Control) -> torch.Tensor:
         raise NotImplementedError("RootHeight violation check not supported")
 
-    def compute_penalty(self, state: EnvState, control: Control) -> torch.Tensor:
+    def compute_soft_penalty(self, state: EnvState, control: Control) -> torch.Tensor:
         return torch.square(state.root_pos[:, 2] - self.target_height)
 
     def step(self, state: EnvState, control: Control) -> Dict[str, torch.Tensor]:
@@ -695,7 +695,7 @@ class PlanarPose(Constraint):
         self.theta_err_scale = theta_err_scale
         self.forward_vec = torch.tensor(forward_vec).to(self.device)[None, :]
 
-    def check_violation(self, state: EnvState, control: Control) -> torch.Tensor:
+    def compute_hard_panelty(self, state: EnvState, control: Control) -> torch.Tensor:
         raise NotImplementedError("PlanarPose violation check not supported")
 
     def get_theta_error(self, state: EnvState):
@@ -725,7 +725,7 @@ class PlanarPose(Constraint):
             pos_error = torch.square(state.root_pos[:, 1] - self.target_y)
         return pos_error
 
-    def compute_penalty(self, state: EnvState, control: Control) -> torch.Tensor:
+    def compute_soft_penalty(self, state: EnvState, control: Control) -> torch.Tensor:
         pos_error = self.get_pos_error(state=state)
 
         theta_error = self.get_theta_error(state=state)
@@ -775,10 +775,10 @@ class EnergyUsage(Constraint):
         self.torque_constant = torque_constant
         self.voltage = voltage
 
-    def check_violation(self, state: EnvState, control: Control) -> torch.Tensor:
+    def compute_hard_panelty(self, state: EnvState, control: Control) -> torch.Tensor:
         raise NotImplementedError("EnergyUsage violation check not supported")
 
-    def compute_penalty(self, state: EnvState, control: Control) -> torch.Tensor:
+    def compute_soft_penalty(self, state: EnvState, control: Control) -> torch.Tensor:
         energy = control.torque * state.dof_vel
         return torch.sum(energy**self.power, dim=1)
 
@@ -846,10 +846,10 @@ class EvenLegUsage(Constraint):
         )
         self.power = power
 
-    def check_violation(self, state: EnvState, control: Control) -> torch.Tensor:
+    def compute_hard_panelty(self, state: EnvState, control: Control) -> torch.Tensor:
         raise NotImplementedError("EnergyUsage violation check not supported")
 
-    def compute_penalty(self, state: EnvState, control: Control) -> torch.Tensor:
+    def compute_soft_penalty(self, state: EnvState, control: Control) -> torch.Tensor:
         leg_set_energy_usage = torch.zeros(
             self.num_envs,
             len(self.leg_joint_sets),
@@ -962,7 +962,7 @@ class LinkPosePair(Constraint):
         )
         return rotation_magnitude
 
-    def check_violation(self, state: EnvState, control: Control) -> torch.Tensor:
+    def compute_hard_panelty(self, state: EnvState, control: Control) -> torch.Tensor:
         termination = torch.zeros(
             state.dof_pos.shape[0], device=self.device, dtype=torch.bool
         )
@@ -982,7 +982,7 @@ class LinkPosePair(Constraint):
                 ).abs() / self.angle_sigma > 1.0
         return termination
 
-    def compute_penalty(self, state: EnvState, control: Control) -> torch.Tensor:
+    def compute_soft_penalty(self, state: EnvState, control: Control) -> torch.Tensor:
         penalty = torch.zeros(state.dof_pos.shape[0], device=self.device)
         if self.position_weight > 0.0:
             dist = self.get_distance(state)
@@ -1053,14 +1053,14 @@ class FootGroundContact(Constraint):
         )
         self.power = power
 
-    def check_violation(self, state: EnvState, control: Control) -> torch.Tensor:
+    def compute_hard_panelty(self, state: EnvState, control: Control) -> torch.Tensor:
         assert state.force_sensor_tensor is not None
         ground_foot_force = state.force_sensor_tensor[
             :, self.feet_sensor_indices, 2
         ].clip(min=0.0)
         return (ground_foot_force > self.violation_foot_force).any(dim=1)
 
-    def compute_penalty(self, state: EnvState, control: Control) -> torch.Tensor:
+    def compute_soft_penalty(self, state: EnvState, control: Control) -> torch.Tensor:
         assert state.force_sensor_tensor is not None
         ground_foot_force = state.force_sensor_tensor[
             :, self.feet_sensor_indices, 2
@@ -1128,11 +1128,11 @@ class EvenMassDistribution(Constraint):
         )
         return foot_force / (foot_force.sum(dim=1, keepdim=True) + 1e-8)
 
-    def check_violation(self, state: EnvState, control: Control) -> torch.Tensor:
+    def compute_hard_panelty(self, state: EnvState, control: Control) -> torch.Tensor:
         mass_distribution = self.get_normalized_mass_distribution(state=state)
         return (mass_distribution.std(dim=1) > self.violation_threshold).any(dim=1)
 
-    def compute_penalty(self, state: EnvState, control: Control) -> torch.Tensor:
+    def compute_soft_penalty(self, state: EnvState, control: Control) -> torch.Tensor:
         mass_distribution = self.get_normalized_mass_distribution(state=state)
         penalty = torch.zeros(state.dof_pos.shape[0], device=self.device)
         valid_mask = mass_distribution.sum(dim=1) > 1e-8
@@ -1201,10 +1201,10 @@ class PointBodyAtGripper(Constraint):
             ]
         )[:, :3, 0]
 
-    def check_violation(self, state: EnvState, control: Control) -> torch.Tensor:
+    def compute_hard_panelty(self, state: EnvState, control: Control) -> torch.Tensor:
         raise NotImplementedError("PointBodyAtGripper violation check not supported")
 
-    def compute_penalty(self, state: EnvState, control: Control) -> torch.Tensor:
+    def compute_soft_penalty(self, state: EnvState, control: Control) -> torch.Tensor:
         gripper_pos_body_frame = self.get_gripper_in_body_frame(state=state)
         # if the body is pointing at the gripper, then the z and y component
         # of the gripper position in the body frame should be small
