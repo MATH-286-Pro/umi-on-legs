@@ -1241,7 +1241,7 @@ Stephen Brawner (brawner@gmail.com)
         <visual>
             <origin
                 xyz="0 0 0"
-                rpy="0 0 0" />
+                rpy="1.5707963267948966 0 0" />
             <geometry>
                 <mesh
                     filename="resources/robots/go2_arx5/arx5_meshes/base_link_new.stl" />
@@ -1280,7 +1280,7 @@ Stephen Brawner (brawner@gmail.com)
         <visual>
             <origin
                 xyz="0 0 0"
-                rpy="0 0 0" />
+                rpy="1.5707963267948966 0 0" />
             <geometry>
                 <mesh
                     filename="resources/robots/go2_arx5/arx5_meshes/link1_new.stl" />
@@ -1330,7 +1330,7 @@ Stephen Brawner (brawner@gmail.com)
         <visual>
             <origin
                 xyz="0 0 0"
-                rpy="0 0 0" />
+                rpy="1.5707963267948966 0 0" />
             <geometry>
                 <mesh
                     filename="resources/robots/go2_arx5/arx5_meshes/link2_new.stl" />
@@ -1388,7 +1388,7 @@ Stephen Brawner (brawner@gmail.com)
         <visual>
             <origin
                 xyz="0 0 0"
-                rpy="0 0 0" />
+                rpy="1.5707963267948966 0 0" />
             <geometry>
                 <mesh
                     filename="resources/robots/go2_arx5/arx5_meshes/link3_new.stl" />
@@ -1446,7 +1446,7 @@ Stephen Brawner (brawner@gmail.com)
         <visual>
             <origin
                 xyz="0 0 0"
-                rpy="0 0 0" />
+                rpy="1.5707963267948966 0 0" />
             <geometry>
                 <mesh
                     filename="resources/robots/go2_arx5/arx5_meshes/link4_new.stl" />
@@ -1504,7 +1504,7 @@ Stephen Brawner (brawner@gmail.com)
         <visual>
             <origin
                 xyz="0 0 0"
-                rpy="0 0 0" />
+                rpy="1.5707963267948966 0 0" />
             <geometry>
                 <mesh
                     filename="resources/robots/go2_arx5/arx5_meshes/link5_new.stl" />
@@ -1561,7 +1561,7 @@ Stephen Brawner (brawner@gmail.com)
         <visual>
             <origin
                 xyz="0 0 0"
-                rpy="0.0 0 0" />
+                rpy="1.5707963267948966 0 0" />
             <geometry>
                 <mesh
                     filename="resources/robots/go2_arx5/arx5_meshes/link6_truncated.stl" />
@@ -1601,7 +1601,7 @@ Stephen Brawner (brawner@gmail.com)
         </collision>
         <!-- left finger -->
         <visual>
-            <origin xyz="0.072 -0.002 0" rpy="0 1.57079632679 1.57079632679" />
+            <origin xyz="0.072 -0.002 0" rpy="0 1.57079632679 0.0" />
             <geometry>
                 <mesh
                     filename="resources/robots/go2_arx5/arx5_meshes/one_piece_wide_grasp_finray_finger.obj" />
@@ -1616,7 +1616,7 @@ Stephen Brawner (brawner@gmail.com)
         </collision>
         <!-- right finger -->
         <visual>
-            <origin xyz="0.072 0.002 0" rpy="0 -1.57079632679 1.57079632679" />
+            <origin xyz="0.072 0.002 0" rpy="3.14159265359 -1.57079632679 0.0" />
             <geometry>
                 <mesh
                     filename="resources/robots/go2_arx5/arx5_meshes/one_piece_wide_grasp_finray_finger.obj" />
