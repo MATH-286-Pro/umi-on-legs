@@ -76,6 +76,8 @@ env:
         - link3
         - link4
         - link5
+
+    # 注意重置噪声非常小，以及重置位置是有固定偏移的
     init_state:
       pos:  
         - -0.5

@@ -42,7 +42,8 @@ class Constraint(Task):
         self.terminate_on_violation = terminate_on_violation
         self.skip_stats = skip_stats
 
-    # 计算奖励
+    # 计算奖励 (返回字典)
+    # 最后计算奖励会把 hard_panelty + soft_penalty
     def reward(self, state: EnvState, control: Control) -> Dict[str, torch.Tensor]:
 
         retval = {}

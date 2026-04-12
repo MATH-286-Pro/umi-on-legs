@@ -517,12 +517,9 @@ class ReachingLinkTask(Task):
                     ),
                 )
             )
-            self.pos_err_sigma = list(self.pos_sigma_curriculum.values())[
-                self.pos_sigma_curriculum_level
-            ]
-            self.past_pos_err *= list(self.pos_sigma_curriculum.keys())[
-                self.pos_sigma_curriculum_level
-            ]
+            self.pos_err_sigma = list(self.pos_sigma_curriculum.values())[self.pos_sigma_curriculum_level]
+            self.past_pos_err *= list(self.pos_sigma_curriculum.keys())[self.pos_sigma_curriculum_level]
+
         if self.orn_sigma_curriculum is not None:
             # make sure the curriculum is sorted
             self.orn_sigma_curriculum = dict(
@@ -541,10 +538,10 @@ class ReachingLinkTask(Task):
             self.past_orn_err *= list(self.orn_sigma_curriculum.keys())[
                 self.orn_sigma_curriculum_level
             ]
+
+        # 模拟延迟
         self.pose_latency = pose_latency
-        self.pose_latency_frames = (
-            int(np.rint(pose_latency / self.sequence_sampler.dt)) + 1
-        )
+        self.pose_latency_frames = (int(np.rint(pose_latency / self.sequence_sampler.dt)) + 1)
         self.pose_latency_frame_variability = (
             pose_latency_variability
             if pose_latency_variability is None
@@ -723,9 +720,7 @@ class ReachingLinkTask(Task):
 
     def get_link_pose(self, state: EnvState):
         # returns the current link pose in the local frame of the robot
-        link_pose = (
-            torch.eye(4, device=self.device).unsqueeze(0).repeat(self.num_envs, 1, 1)
-        )
+        link_pose = (torch.eye(4, device=self.device).unsqueeze(0).repeat(self.num_envs, 1, 1))
         link_pose[..., :3, 3] = self.get_link_pos(state=state)
         # pt3d quaternion convention is wxyz
         link_pose[..., :3, :3] = self.get_link_rot_mat(state=state)
@@ -852,7 +847,7 @@ class ReachingLinkTask(Task):
     def observe(self, state: EnvState) -> torch.Tensor:
 
         # 通过 +- t_offset 获取多帧 obs 轨迹
-        # 世界坐标系下 目标位置
+        # 世界坐标系下 齐次变换矩阵 R P
         global_target_pose = torch.stack(
             [self.get_target_pose(times=state.episode_time + t_offset, sim_dt=state.sim_dt,) for t_offset in self.target_obs_times], dim=1)  # (num_envs, num_obs, 4, 4)
         
@@ -870,7 +865,8 @@ class ReachingLinkTask(Task):
         # 变换矩阵 解压为 pos + orn
         pos_obs = (local_target_pose[..., :3, 3] * self.pos_obs_scale).view(self.num_envs, -1)
         orn_obs = (pt3d.matrix_to_rotation_6d(local_target_pose[..., :3, :3]) * self.orn_obs_scale).view(self.num_envs, -1)
-        relative_pose_obs = torch.cat((pos_obs, orn_obs), dim=1)
+        relative_pose_obs = torch.cat((pos_obs, 
+                                       orn_obs), dim=1)
 
         # NOTE after episode resetting, the first pose will be outdated
         # (this is a quirk of isaacgym, where state resets don't apply until the

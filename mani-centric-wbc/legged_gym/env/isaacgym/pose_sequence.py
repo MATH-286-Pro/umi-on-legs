@@ -83,10 +83,11 @@ class PicklePoseSequenceLoader(SequenceSampler):
             device=self.device,
             generator=generator,
         )
-        pos_seq = self.ee_pos[episode_idx, : self.episode_length]
+        pos_seq     = self.ee_pos[episode_idx, : self.episode_length]
         rot_mat_seq = self.ee_rot_mat[episode_idx, : self.episode_length]
+
+        # Padding 时间补全
         if pos_seq.shape[1] < self.episode_length:
-            # pad
             pos_seq = torch.cat(
                 [
                     pos_seq,

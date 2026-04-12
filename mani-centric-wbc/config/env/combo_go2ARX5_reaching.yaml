@@ -40,8 +40,10 @@ constraints:
       - RR_calf_joint
       - RL_calf_joint
     penalty_weight: -1e-3
+
   point_body_at_gripper:
     gripper_link_name: end_effector
+
   even_mass_distribution:
     penalty_weight: -1.0
     feet_sensor_indices:
@@ -49,6 +51,7 @@ constraints:
       - 1
       - 2
       - 3
+
   aligned_body_ee:
     penalty_weight: -1.0
     default_config:
@@ -60,8 +63,10 @@ constraints:
     joint_names:
       - joint1
       - joint5
+
   root_height:
     target_height: 0.35
+
   foot_contact_force:
     feet_sensor_indices:
       - 0
@@ -69,10 +74,12 @@ constraints:
       - 2
       - 3
     violation_foot_force: 20.0
+
   torque:
     violation_torque: 40.0
     penalty_weight: -1e-4
     power: 2
+
   keep_ee_close:
     link_1: end_effector
     link_2: link1 # NOTE link 1 is fine because it's at the base of the arm
@@ -82,32 +89,38 @@ constraints:
     violation_weight: -1.0
     terminate_on_violation: false
     mode: max
+
   fr_feet_under_hips:
     link_1: FR_thigh
     link_2: FR_foot
     planar: true
     penalty_weight: -1.0
     distance_sigma: 0.5
+
   fl_feet_under_hips:
     link_1: FL_thigh
     link_2: FL_foot
     planar: true
     penalty_weight: ${env.constraints.fr_feet_under_hips.penalty_weight}
     distance_sigma: ${env.constraints.fr_feet_under_hips.distance_sigma}
+
   rr_feet_under_hips:
     link_1: RR_thigh
     link_2: RR_foot
     planar: true
     penalty_weight: ${env.constraints.fr_feet_under_hips.penalty_weight}
     distance_sigma: ${env.constraints.fr_feet_under_hips.distance_sigma}
+
   rl_feet_under_hips:
     link_1: RL_thigh
     link_2: RL_foot
     planar: true
     penalty_weight: ${env.constraints.fr_feet_under_hips.penalty_weight}
     distance_sigma: ${env.constraints.fr_feet_under_hips.distance_sigma}
+
   action_rate:
     penalty_weight: -5e-2
+
   arm_action_rate:
     violation_weight: 0.0
     penalty_weight: -0.02
@@ -119,12 +132,14 @@ constraints:
       - joint4
       - joint5
       - joint6
+
   arm_base_action_rate:
     violation_weight: 0.0
     penalty_weight: -0.1
     terminate_on_violation: false
     joint_names:
       - joint1
+
   even_leg_usage:
     leg_joint_sets:
       FR:
