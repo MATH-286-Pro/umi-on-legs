@@ -726,11 +726,10 @@ class ReachingLinkTask(Task):
         link_pose[..., :3, :3] = self.get_link_rot_mat(state=state)
         return link_pose
 
+    #00ff00 这里的 tracking 是有 curriculum 训练的
     def reward(self, state: EnvState, control: Control) -> Dict[str, torch.Tensor]:
         # compute reward using the current pose
-        pos_reward = torch.exp(
-            -(self.get_pos_err(state=state) ** 2) / self.pos_err_sigma
-        )
+        pos_reward = torch.exp(-(self.get_pos_err(state=state) ** 2) / self.pos_err_sigma)
         orn_reward = torch.exp(-self.get_orn_err(state=state) / self.orn_err_sigma)
         return {
             "pos":   pos_reward * self.pos_reward_scale,
