@@ -933,35 +933,38 @@ class LinkPosePair(Constraint):
     def get_distance(self, state: EnvState) -> torch.Tensor:
         link_1_pos = state.rigid_body_pos[:, self.link_1_index, :]
         link_2_pos = state.rigid_body_pos[:, self.link_2_index, :]
-        if self.planar:
-            return torch.norm(link_1_pos[:, :2] - link_2_pos[:, :2], dim=1)
+
+        match self.planar:
+
+            case False:
         return torch.norm(link_1_pos - link_2_pos, dim=1)
+            
+            case True: #00ff00 实际 planner = True
+                return torch.norm(link_1_pos[:, :2] - link_2_pos[:, :2], dim=1)
+
 
     def get_angle(self, state: EnvState) -> torch.Tensor:
-        link_1_mat = pt3d.quaternion_to_matrix(
-            state.rigid_body_xyzw_quat[:, self.link_1_index, :][:, [3, 0, 1, 2]]
-        )
-        link_2_mat = pt3d.quaternion_to_matrix(
-            state.rigid_body_xyzw_quat[:, self.link_2_index, :][:, [3, 0, 1, 2]]
-        )
+        link_1_mat = pt3d.quaternion_to_matrix(state.rigid_body_xyzw_quat[:, self.link_1_index, :][:, [3, 0, 1, 2]])
+        link_2_mat = pt3d.quaternion_to_matrix(state.rigid_body_xyzw_quat[:, self.link_2_index, :][:, [3, 0, 1, 2]])
         # compute relative transform
         mat = link_1_mat @ link_2_mat.transpose(1, 2)
 
-        if self.planar:
-            euler_angles = pt3d.matrix_to_euler_angles(mat, "XYZ")
-            return euler_angles[:, 2].abs()
+        match self.planar:
 
+            case False:
         trace = torch.diagonal(mat, dim1=-2, dim2=-1).sum(dim=-1)
         # to prevent numerical instability, clip the trace to [-1, 3]
         trace = torch.clamp(trace, min=-1 + 1e-8, max=3 - 1e-8)
         rotation_magnitude = torch.arccos((trace - 1) / 2)
         # account for symmetry
         rotation_magnitude = rotation_magnitude % (2 * torch.pi)
-        rotation_magnitude = torch.min(
-            rotation_magnitude,
-            2 * torch.pi - rotation_magnitude,
-        )
+                rotation_magnitude = torch.min(rotation_magnitude, 2 * torch.pi - rotation_magnitude)
         return rotation_magnitude
+
+            case True:
+                euler_angles = pt3d.matrix_to_euler_angles(mat, "XYZ")
+                return euler_angles[:, 2].abs()
+
 
     def compute_hard_panelty(self, state: EnvState, control: Control) -> torch.Tensor:
         termination = torch.zeros(
