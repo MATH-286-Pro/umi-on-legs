@@ -568,8 +568,6 @@ class ReachingLinkTask(Task):
         self.euler_noise = euler_noise
 
     def reset_idx(self, env_ids: torch.Tensor):
-        if len(env_ids) == 0:
-            return
 
         env_origins = torch.stack(
             [
@@ -605,6 +603,7 @@ class ReachingLinkTask(Task):
         self.curr_target_pos[env_ids, :] = pos_seq[:, 0, :].to(self.device)
         self.curr_target_rot[env_ids, :] = rot_seq[:, 0, :].to(self.device)
 
+        #00ff00 更新训练课程
         # update curriculum
         if self.pos_sigma_curriculum is not None:
             avg_pos_err = self.past_pos_err.mean().item()

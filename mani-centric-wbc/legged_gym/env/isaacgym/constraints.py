@@ -937,8 +937,8 @@ class LinkPosePair(Constraint):
         match self.planar:
 
             case False:
-        return torch.norm(link_1_pos - link_2_pos, dim=1)
-            
+                return torch.norm(link_1_pos - link_2_pos, dim=1)
+             
             case True: #00ff00 实际 planner = True
                 return torch.norm(link_1_pos[:, :2] - link_2_pos[:, :2], dim=1)
 
@@ -952,15 +952,15 @@ class LinkPosePair(Constraint):
         match self.planar:
 
             case False:
-        trace = torch.diagonal(mat, dim1=-2, dim2=-1).sum(dim=-1)
-        # to prevent numerical instability, clip the trace to [-1, 3]
-        trace = torch.clamp(trace, min=-1 + 1e-8, max=3 - 1e-8)
-        rotation_magnitude = torch.arccos((trace - 1) / 2)
-        # account for symmetry
-        rotation_magnitude = rotation_magnitude % (2 * torch.pi)
+                trace = torch.diagonal(mat, dim1=-2, dim2=-1).sum(dim=-1)
+                # to prevent numerical instability, clip the trace to [-1, 3]
+                trace = torch.clamp(trace, min=-1 + 1e-8, max=3 - 1e-8)
+                rotation_magnitude = torch.arccos((trace - 1) / 2)
+                # account for symmetry
+                rotation_magnitude = rotation_magnitude % (2 * torch.pi)
                 rotation_magnitude = torch.min(rotation_magnitude, 2 * torch.pi - rotation_magnitude)
-        return rotation_magnitude
-
+                return rotation_magnitude
+                
             case True:
                 euler_angles = pt3d.matrix_to_euler_angles(mat, "XYZ")
                 return euler_angles[:, 2].abs()
@@ -1127,9 +1127,7 @@ class EvenMassDistribution(Constraint):
 
     def get_normalized_mass_distribution(self, state: EnvState):
         assert state.force_sensor_tensor is not None
-        foot_force = state.force_sensor_tensor[:, self.feet_sensor_indices, 2].clip(
-            min=0.0
-        )
+        foot_force = state.force_sensor_tensor[:, self.feet_sensor_indices, 2].clip(min=0.0)
         return foot_force / (foot_force.sum(dim=1, keepdim=True) + 1e-8)
 
     def compute_hard_panelty(self, state: EnvState, control: Control) -> torch.Tensor:
