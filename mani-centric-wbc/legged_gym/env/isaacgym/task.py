@@ -551,16 +551,12 @@ class ReachingLinkTask(Task):
             )
         )
 
-        self.link_pose_history = torch.zeros(
-            (self.num_envs, self.pose_latency_frames, 4, 4),
-            device=self.device,
-        )
-        self.link_pose_history[..., :, :] = torch.eye(4, device=self.device)
-        self.root_pose_history = torch.zeros(
-            (self.num_envs, self.pose_latency_frames, 4, 4),
-            device=self.device,
-        )
-        self.root_pose_history[..., :, :] = torch.eye(4, device=self.device)
+        self.ee_pose_history = torch.zeros((self.num_envs, self.pose_latency_frames, 4, 4),device=self.device)
+        self.ee_pose_history[..., :, :] = torch.eye(4, device=self.device) # 初始化变成单位矩阵
+
+        self.root_pose_history = torch.zeros((self.num_envs, self.pose_latency_frames, 4, 4),device=self.device)
+        self.root_pose_history[..., :, :] = torch.eye(4, device=self.device) # 初始化变成单位矩阵
+
         self.pose_latency_warmup_steps = pose_latency_warmup_steps
         self.pose_latency_warmup_start = pose_latency_warmup_start
         self.steps = 0
@@ -625,7 +621,7 @@ class ReachingLinkTask(Task):
                     self.orn_sigma_curriculum_level = level
 
         # update pose history
-        self.link_pose_history[device_env_ids, :, :, :] = torch.eye(4, device=self.device)
+        self.ee_pose_history[device_env_ids, :, :, :] = torch.eye(4, device=self.device)
         self.root_pose_history[device_env_ids, :, :, :] = torch.eye(4, device=self.device)
 
     # 获取目标 trajectory 数据
@@ -656,7 +652,7 @@ class ReachingLinkTask(Task):
         self.past_pos_err = (1 - smoothing) * self.past_pos_err + smoothing * pos_err
         self.past_orn_err = (1 - smoothing) * self.past_orn_err + smoothing * orn_err
 
-        self.link_pose_history = torch.cat([self.link_pose_history[:, 1:], self.get_link_pose(state=state).unsqueeze(1),], dim=1)
+        self.ee_pose_history = torch.cat([self.ee_pose_history[:, 1:], self.get_link_pose(state=state).unsqueeze(1),], dim=1)
         self.root_pose_history = torch.cat([self.root_pose_history[:, 1:], state.root_pose.clone().unsqueeze(1),], dim=1)
         
         self.steps += 1
@@ -754,8 +750,7 @@ class ReachingLinkTask(Task):
 
         # 通过 +- t_offset 获取多帧 obs 轨迹
         # 世界坐标系下 目标位置
-        global_target_pose = torch.stack(
-            [self.get_target_pose(times=state.episode_time + t_offset, sim_dt=state.sim_dt,) for t_offset in self.target_obs_times], dim=1)  # (num_envs, num_obs, 4, 4)
+        global_target_pose = torch.stack([self.get_target_pose(times=state.episode_time + t_offset, sim_dt=state.sim_dt,) for t_offset in self.target_obs_times], dim=1)  # (num_envs, num_obs, 4, 4)
         
         # get the most outdated pose, to account for latency
         latency_idx = int(np.rint(self.get_latency_scheduler() * self.pose_latency_frames))  # number of frames to wait
@@ -779,7 +774,7 @@ class ReachingLinkTask(Task):
         if self.target_relative_to_base:
             observation_link_pose = self.root_pose_history[:, -latency_idx].clone()   # clone otherwise sim state will be modified
         else:
-            observation_link_pose = self.link_pose_history[:, -latency_idx].clone()   # clone otherwise sim state will be modified
+            observation_link_pose = self.ee_pose_history[:, -latency_idx].clone()   # clone otherwise sim state will be modified
 
 
         # # 噪声 (暂时跳过)
@@ -857,7 +852,7 @@ class ReachingLinkTask(Task):
         # 世界坐标 转 体坐标
         # 坐标系 4x4 齐次变换矩阵
         # observation_link_pose = self.link_pose_history[:, -latency_idx].clone()   # clone otherwise sim state will be modified
-        observation_link_pose = self.link_pose_history[:, -1].clone()
+        observation_link_pose = self.ee_pose_history[:, -1].clone()
         local_target_pose     = (torch.linalg.inv(observation_link_pose[:, None, :, :]) @ global_target_pose)
 
         # 变换矩阵 解压为 pos + orn

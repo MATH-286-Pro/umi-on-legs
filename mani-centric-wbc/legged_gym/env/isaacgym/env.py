@@ -586,6 +586,7 @@ class IsaacGymEnv(VecEnv):
         # 这里奖励会乘上系数
         return {f"reward/{k}": v * self.reward_dt_scale for k, v in return_dict.items()}
 
+    #00ff00 observation 信息
     def get_observations(
         self,
         state: EnvState,
@@ -594,14 +595,14 @@ class IsaacGymEnv(VecEnv):
         setup_obs: Dict[str, EnvSetupAttribute],
     ):
         obs_attrs = []
+
         for obs_attr in state_obs.values():
             value = obs_attr(struct=state, generator=self.generator)
             assert value.shape[-1] == obs_attr.dim
             obs_attrs.append(value)
-        state_obs_tensor = torch.cat(
-                                    obs_attrs,
-                                    dim=1,
-                                )
+        state_obs_tensor = torch.cat(obs_attrs, dim=1)
+
+        # task 相关 observaton
         if len(self.tasks) > 0:
             all_task_obs = []
             for k, task in self.tasks.items():
@@ -612,24 +613,24 @@ class IsaacGymEnv(VecEnv):
         else:
             task_obs_tensor = torch.zeros((self.num_envs, 0), dtype=torch.float, device=self.device)
 
+        # setup observation
         if len(setup_obs) > 0:
             obs_attrs = []
             for k, obs_attr in setup_obs.items():
-                value = obs_attr(struct=setup, generator=self.generator).reshape(
-                    self.num_envs, -1
-                )
+                value = obs_attr(struct=setup, generator=self.generator).reshape(self.num_envs, -1)
                 assert value.shape[-1] == obs_attr.dim
                 obs_attrs.append(value)
             setup_obs_tensor = torch.cat(obs_attrs, dim=1)
         else:
             setup_obs_tensor = torch.zeros((self.num_envs, 0), dtype=torch.float, device=self.device)
 
+        # 总观测
         return torch.cat(
             (
                 setup_obs_tensor,
                 state_obs_tensor,
-                task_obs_tensor,
-                self.ctrl.action,
+                task_obs_tensor,  # task 相关 observation
+                self.ctrl.action, # action
             ),
             dim=1,
         )
