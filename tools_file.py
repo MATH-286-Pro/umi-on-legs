@@ -202,6 +202,56 @@ def _quat_to_rot(quat):
     return rot
 
 
+def rot_to_axis_angle(rot):
+    """Convert a rotation matrix or an array of rotation matrices to axis-angle vectors.
+    If `mat_or_mats` has shape (..., 3, 3) the result has shape (..., 3)."""
+    rot = np.asarray(rot, dtype=float)
+    
+    # handle batch inputs where the last two dims are (3,3)
+    if rot.ndim >= 3 and rot.shape[-2:] == (3, 3):
+        mats = rot.reshape(-1, 3, 3)
+        res = np.asarray([rot_to_axis_angle(m) for m in mats], dtype=float)
+        return res.reshape(rot.shape[:-2] + (3,))
+
+    cos_angle = (np.trace(rot) - 1.0) / 2.0
+    cos_angle = np.clip(cos_angle, -1.0, 1.0)
+    angle = np.arccos(cos_angle)
+
+    if angle < 1e-8:
+        return np.zeros(3)
+
+    axis = np.array(
+        [
+            rot[2, 1] - rot[1, 2],
+            rot[0, 2] - rot[2, 0],
+            rot[1, 0] - rot[0, 1],
+        ]
+    ) / (2.0 * np.sin(angle))
+
+    return axis * angle
+
+def axis_angle_to_rot(axis_angle):
+    axis_angle = np.asarray(axis_angle, dtype=float)
+    angle = np.linalg.norm(axis_angle)
+    if angle < 1e-8:
+        return np.eye(3)
+
+    axis = axis_angle / angle
+    x, y, z = axis
+    c = np.cos(angle)
+    s = np.sin(angle)
+    C = 1.0 - c
+
+    return np.array(
+        [
+            [c + x * x * C, x * y * C - z * s, x * z * C + y * s],
+            [y * x * C + z * s, c + y * y * C, y * z * C - x * s],
+            [z * x * C - y * s, z * y * C + x * s, c + z * z * C],
+        ],
+        dtype=float,
+    )
+
+# ======= Interpolation ======= #
 def _interp_array(t, value, new_t):
     value = np.asarray(value, dtype=float)
 
