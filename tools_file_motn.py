@@ -209,4 +209,5 @@ def motn_to_tf(
     return {
         "t": raw["t"],
         "tf": T_target,
+        "gripper_width": np.zeros_like(raw["t"]),
     }

@@ -259,7 +259,7 @@ def _slerp_quat(t, quat, new_t):
 
 
 # ======= Resampling for transform matrix ======= #
-def tf_resample_tf(tf_list, target_fps, padding=False) -> list[dict]:
+def tfs_resample_tfs(tf_list, target_fps, padding=False) -> list[dict]:
 
     current_fps = get_fps(tf_list)
     has_repeated_t = any(
