@@ -161,7 +161,7 @@ def zero_init_yaw(Ts):
 
 
 # ======== Main Functions ======== #
-def SHIFT_TF_VERSION(tf, convention):
+def SHIFT_TF_VERSION(tf):
 
     # 创建变化矩阵
     R_SHIFT = np.array([[0, 0, -1],
@@ -180,9 +180,8 @@ def SHIFT_TF_VERSION(tf, convention):
     return new_tf
 
 
-def process_tracking_data(
+def motn_to_tf(
         path: Path,
-        convention: dict[str, str] = CONVENTION,
     ):
     
     raw = load_motn(path)
@@ -197,17 +196,17 @@ def process_tracking_data(
     if invert_euler:
         euler_rad = -euler_rad
 
+    # motn original transform matrix
     R_source = np.asarray([euler_to_matrix(e, order=EULER_ORDER) for e in euler_rad])
     T_source = pos_rot_to_tf(pos, R_source)
 
     # Apply Convention Transform
     T_target = T_source.copy()
-    T_target = SHIFT_TF_VERSION(T_target, convention)
+    T_target = SHIFT_TF_VERSION(T_target)
     T_target = zero_init_xy(T_target)
     T_target = zero_init_yaw(T_target)
 
     return {
         "t": raw["t"],
-        "tf_source": T_source,
-        "tf_target": T_target,
+        "tf": T_target,
     }

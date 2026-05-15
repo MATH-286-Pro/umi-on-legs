@@ -7,7 +7,19 @@ import pickle
 import numpy as np
 
 
-MIRROR_XZ = np.diag([1.0, -1.0, 1.0])
+MIRROR_PLANES = {
+    "xz": np.array([1.0, -1.0, 1.0], dtype=float),
+    "yz": np.array([-1.0, 1.0, 1.0], dtype=float),
+    "xy": np.array([1.0, 1.0, -1.0], dtype=float),
+}
+
+MIRROR_ROT_VEC_SIGNS = {
+    # Reflection transforms rotation vectors as det(M) * M * rotvec.
+    # x/y/z correspond to roll/pitch/yaw axes.
+    "xz": np.array([-1.0, 1.0, -1.0], dtype=float),  # roll + yaw
+    "yz": np.array([1.0, -1.0, -1.0], dtype=float),  # pitch + yaw
+    "xy": np.array([-1.0, -1.0, 1.0], dtype=float),  # roll + pitch
+}
 
 
 def matrix_to_rotvec(mat):
@@ -94,17 +106,43 @@ def validate_tf(tf):
     return tf
 
 
-def mirror_xz_tf(tf):
-    """Mirror a homogeneous transform sequence across the XZ plane.
+def mirror_tf(tf, plane):
+    """Mirror transform positions and orientations across a coordinate plane.
 
-    Position is reflected as y -> -y. Rotation is conjugated with the same
-    reflection matrix, R' = M R M, so the output remains a valid SO(3) rotation.
+    The orientation update uses R' = M R M where M is the plane reflection.
+    This keeps R' in SO(3) and produces these rotation-vector sign changes:
+    xz -> roll/yaw, xy -> roll/pitch, yz -> pitch/yaw.
     """
     tf = validate_tf(tf)
+    plane = plane.lower()
+    if plane not in MIRROR_PLANES:
+        raise ValueError("plane must be one of 'xz', 'yz', or 'xy'")
+
+    mirror = np.diag(MIRROR_PLANES[plane])
     out = tf.copy()
-    out[..., :3, 3] = tf[..., :3, 3] @ MIRROR_XZ.T
-    out[..., :3, :3] = np.einsum("ij,...jk,kl->...il", MIRROR_XZ, tf[..., :3, :3], MIRROR_XZ)
+    out[..., :3, 3] = tf[..., :3, 3] @ mirror.T
+    out[..., :3, :3] = np.einsum("ij,...jk,kl->...il", mirror, tf[..., :3, :3], mirror)
     return out
+
+
+def mirror_position_tf(tf, plane, mirror_xz_yaw=True):
+    """Backward-compatible alias for mirror_tf.
+
+    mirror_xz_yaw is kept for old callers; all planes now mirror orientation.
+    """
+    return mirror_tf(tf, plane)
+
+
+def mirror_xz_tf(tf, mirror_yaw=True):
+    return mirror_tf(tf, "xz")
+
+
+def mirror_yz_tf(tf):
+    return mirror_tf(tf, "yz")
+
+
+def mirror_xy_tf(tf):
+    return mirror_tf(tf, "xy")
 
 
 def reverse_tf(tf):
@@ -156,10 +194,10 @@ def reset_reversed_time(t):
     return t[-1] - t[::-1]
 
 
-def mirror_xz_episode(episode, keep_ee_tf=False):
-    """Mirror one pkl episode across the XZ plane."""
+def mirror_episode(episode, plane, keep_ee_tf=False):
+    """Mirror one pkl episode across one coordinate plane."""
     out = _copy_episode(episode)
-    mirrored_tf = mirror_xz_tf(episode_to_tf(episode))
+    mirrored_tf = mirror_tf(episode_to_tf(episode), plane)
     fields = tf_to_episode_fields(mirrored_tf)
 
     pos_dtype = np.asarray(episode["ee_pos"]).dtype if "ee_pos" in episode else mirrored_tf.dtype
@@ -173,6 +211,18 @@ def mirror_xz_episode(episode, keep_ee_tf=False):
     if keep_ee_tf or "ee_tf" in episode:
         out["ee_tf"] = fields["ee_tf"].astype(tf_dtype, copy=False)
     return out
+
+
+def mirror_xz_episode(episode, keep_ee_tf=False):
+    return mirror_episode(episode, "xz", keep_ee_tf=keep_ee_tf)
+
+
+def mirror_yz_episode(episode, keep_ee_tf=False):
+    return mirror_episode(episode, "yz", keep_ee_tf=keep_ee_tf)
+
+
+def mirror_xy_episode(episode, keep_ee_tf=False):
+    return mirror_episode(episode, "xy", keep_ee_tf=keep_ee_tf)
 
 
 def reverse_episode(episode):
@@ -191,30 +241,53 @@ def reverse_episode(episode):
     return out
 
 
-def augment_episode(episode, mirror=True, reverse=True, include_original=True):
+def augment_traj(
+    trajs,
+    mirror_planes=("xy", "xz", "yz"),
+    reverse=False,
+    include_original=True,
+):
     """Return augmented variants of one episode.
 
-    The default output order is: original, mirrored, reversed.
+    Mirrors are applied cumulatively to the current variant set. With the
+    default xy -> xz -> yz order, one trajectory becomes these base variants:
+    original, xy, xz, xy+xz, yz, xy+yz, xz+yz, xy+xz+yz.
     """
-    variants = []
-    if include_original:
-        variants.append(_copy_episode(episode))
-    if mirror:
-        variants.append(mirror_xz_episode(episode))
+    base_variants = [_copy_episode(trajs)]
+
+    for plane in mirror_planes:
+        base_variants.extend(
+            mirror_episode(variant, plane) for variant in list(base_variants)
+        )
+
+    if not include_original:
+        base_variants = base_variants[1:]
+
+    variants = list(base_variants)
+
+    # Playback
     if reverse:
-        variants.append(reverse_episode(episode))
+        variants.extend(reverse_episode(variant) for variant in base_variants)
+
     return variants
 
 
-def augment_dataset(data, mirror=True, reverse=True, include_original=True):
+def augment_dataset(
+    data,
+    mirror_planes=("xy", "xz", "yz"),
+    reverse=False,
+    include_original=True,
+    mirror_xz_yaw=True,
+):
     augmented = []
     for episode in data:
         augmented.extend(
-            augment_episode(
+            augment_traj(
                 episode,
-                mirror=mirror,
+                mirror_planes=mirror_planes,
                 reverse=reverse,
                 include_original=include_original,
+                mirror_xz_yaw=mirror_xz_yaw,
             )
         )
     return augmented
@@ -236,16 +309,18 @@ def augment_pkl(
     input_path,
     output_path,
     *,
-    mirror=True,
-    reverse=True,
+    mirror_planes=("xy", "xz", "yz"),
+    reverse=False,
     include_original=True,
+    mirror_xz_yaw=True,
 ):
     data = load_pkl(input_path)
     augmented = augment_dataset(
         data,
-        mirror=mirror,
+        mirror_planes=mirror_planes,
         reverse=reverse,
         include_original=include_original,
+        mirror_xz_yaw=mirror_xz_yaw,
     )
     save_pkl(augmented, output_path)
     return augmented
